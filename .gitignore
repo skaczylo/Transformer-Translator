@@ -3,3 +3,4 @@ dataset.json
 transformer_training.ipynb
 documentacion/
 resultados/
+__pycache__
