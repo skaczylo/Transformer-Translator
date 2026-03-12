@@ -15,7 +15,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 
-CONTEXT_LENGTH = 300
+CONTEXT_LENGTH = 64
 D_EMBEDDING = 512
 ATTENTION_HEADS = 8
 DROPOUT = 0.0
@@ -34,7 +34,7 @@ class AttentionHead(nn.Module):
         self.query = nn.Linear(in_features=D_EMBEDDING,out_features=dimension, bias=False)
         self.value = nn.Linear(in_features=D_EMBEDDING,out_features=dimension, bias = False)
 
-
+        
         #self.dropout = nn.Dropout(DROPOUT)
 
     def forward(self,key_input,query_input,value_input, padding_mask = None, masked_attention = False):
@@ -45,12 +45,13 @@ class AttentionHead(nn.Module):
         """
 
         #B = numero de Batch; T = numero de "tokens"; C = dimension de cada token
-        B, N, D_i = value_input.shape
-        self.register_buffer('tril', torch.tril(torch.ones(N, N)))
+        B, N, D_i = query_input.shape
+        self.register_buffer('tril', torch.tril(torch.ones(CONTEXT_LENGTH, CONTEXT_LENGTH)).to(value_input.device))
+        
 
         K = self.key(key_input) # (B, N , D_i)
-        Q = self.key(query_input) #(B, N , D_i)
-        V = self.key(value_input) #(B, N , D_i)
+        Q = self.query(query_input) #(B, N , D_i)
+        V = self.value(value_input) #(B, N , D_i)
 
         #Calculamos la Atención QxK^T
         #Calculamos la "afinidad" Q x K^t
@@ -63,6 +64,7 @@ class AttentionHead(nn.Module):
         #Mascara para que no pongan atencion en los tokens <PAD>
         if padding_mask is not None:
             scores = scores.masked_fill(padding_mask, float('-inf'))
+         
 
         #Mascara para que los tokens y_n del decoder no se fijen en los posterioes y_n+1,y_n+2,....
         if masked_attention is True:
@@ -131,6 +133,7 @@ class Decoder(nn.Module):
 
     def __init__(self):
         super().__init__()
+        
         self.masked_attention_heads = MultiHeadAttention(num_heads= ATTENTION_HEADS)
         self.attention_heads = MultiHeadAttention(num_heads=ATTENTION_HEADS)
         self.mlp = MLP()
@@ -139,23 +142,24 @@ class Decoder(nn.Module):
         self.LayerNorm3 = nn.LayerNorm(D_EMBEDDING)
 
 
-    def forward(self,x,encoder_output,padding_mask = None):
+    def forward(self,y,y_padding_mask,encoder_output,encoder_padding_mask):
 
 
         #Primeras capas de atencion
-        masked_attention = self.masked_attention_heads(key_input = x,
-                                                        query_input = x,
-                                                        value_input = x,
-                                                        padding_mask = padding_mask)
+        masked_attention = self.masked_attention_heads(key_input = y,
+                                                        query_input = y,
+                                                        value_input = y,
+                                                        padding_mask = y_padding_mask,
+                                                        masked_attention = True)
 
-        z = self.LayerNorm1(masked_attention + x)
+        z = self.LayerNorm1(masked_attention + y)
 
 
         #Cross Attention con Encoder
         cross_attention = self.attention_heads(key_input = encoder_output,
                                                query_input = z,
                                                value_input = encoder_output,
-                                               padding_mask = padding_mask,
+                                               padding_mask = encoder_padding_mask,
                                                masked_attention=False)
 
         y = self.LayerNorm2(cross_attention + z)
@@ -179,7 +183,7 @@ class Encoder(nn.Module):
 
     def __init__(self):
         super().__init__()
-
+        
         self.attention_heads = MultiHeadAttention(num_heads= ATTENTION_HEADS)
         self.mlp = MLP()
         self.LayerNorm1 = nn.LayerNorm(D_EMBEDDING)
@@ -209,6 +213,7 @@ class Transformer(nn.Module):
     def __init__(self, vocab_size,pad_id):
         super().__init__()
 
+        
         self.pad_id = pad_id
         #Input embedding + Positional Encoding
         self.input_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=D_EMBEDDING, padding_idx= pad_id)
@@ -233,41 +238,40 @@ class Transformer(nn.Module):
 
         return encoder_output
 
-    def decoder(self,y,encoder_output,y_padding_mask):
+    def decoder(self,y,y_padding_mask,encoder_output,encoder_padding_mask):
         decoder_output = y
         for decoder in self.decoder_blocks:
-          decoder_output = decoder(decoder_output, encoder_output,padding_mask = y_padding_mask)
+          decoder_output = decoder(decoder_output,y_padding_mask,encoder_output,encoder_padding_mask)
 
         return decoder_output
 
     def padding_mask(self, input):
       B, num_tokens = input.shape
 
-      vector_mask = (input == self.pad_id).unsqueeze(1)
-      padding_mask = torch.ones((B, num_tokens,num_tokens),dtype=bool).to(device)
-      padding_mask  = padding_mask * vector_mask
+      padding_mask = (input == self.pad_id).unsqueeze(1)
 
       return padding_mask
 
     def forward(self, x, y):
 
-        B, num_tokens = x.shape #(N, Num_tokens)
+        B, x_num_tokens = x.shape #(N, Num_tokens)
+        B, y_num_tokens = y.shape
 
         #Input Embedding + Positional Embedding
         x_embedding = self.input_embedding_table(x)
-        positional_encoding = self.input_positional_encoding(torch.arange(num_tokens).to(device))
+        positional_encoding = self.input_positional_encoding(torch.arange(x_num_tokens).to(x.device))
         x_embedding = x_embedding + positional_encoding
 
         #Output Embedding + Positional Embedding
         y_embedding = self.output_embedding_table(y)
-        positional_encoding = self.input_positional_encoding(torch.arange(num_tokens).to(device))
+        positional_encoding = self.output_positional_encoding(torch.arange(y_num_tokens).to(y.device))
         y_embedding = y_embedding + positional_encoding
 
 
         #Encoder-Decoder
 
         encoder_output = self.encoder(x_embedding, x_padding_mask = self.padding_mask(x))
-        decoder_output = self.decoder(y_embedding,encoder_output,self.padding_mask(y))
+        decoder_output = self.decoder(y_embedding,self.padding_mask(y),encoder_output,self.padding_mask(x))
 
 
         output = self.linear(decoder_output)
@@ -276,32 +280,41 @@ class Transformer(nn.Module):
         return output
 
 
-    def predict(self,x,y,max_new_tokens = CONTEXT_LENGTH, device = "cpu"):
+    def predict(self, x, y, end_token_id, max_new_tokens=CONTEXT_LENGTH, device='cpu'):
+        self.eval()
+        
+        # 1. Asegurar que los inputs iniciales no superen el límite físico del modelo
+        x = x[:, :CONTEXT_LENGTH].to(device)
+        y = y[:, :CONTEXT_LENGTH].to(device)
 
-        self.eval()  # Modo evaluación
-        B, num_tokens= x.shape
-
-        x = x.to(device)
-        y = y.to(device)
-
-        # Padding mask para el encoder
-        x_padding_mask =self.padding_mask(x)
-        y_padding_mask =self.padding_mask(y)
-
+        # Obtenemos el ID del token de fin para poder parar
+        # Ajusta esta ruta según donde guardes el ID en tu clase Tokenizer
+        
         with torch.no_grad():
             for t in range(max_new_tokens):
-                output = self(x,y).to(device)
+                # 2. Mantener siempre la ventana de contexto (IMPORTANTE)
+                # Esto asegura que nunca le pases al Transformer más de CONTEXT_LENGTH
+                y_cond = y[:, -CONTEXT_LENGTH:]
+                
+                # Forward pass
+                logits = self(x, y_cond) 
+                
+                # 3. Tomar solo los logits del ÚLTIMO token generado
+                # logits tiene forma [B, T, Vocab], queremos [B, Vocab] de la posición T-1
+                last_token_logits = logits[:, -1, :]
+                
+                # Aplicamos Softmax y muestreamos
+                probs = F.softmax(last_token_logits, dim=-1)
+                idx_token = torch.multinomial(probs, num_samples=1) # [B, 1]
+                
+                # 4. Concatenar el nuevo token al resultado
+                y = torch.cat([y, idx_token], dim=1)
+                
+                # 5. Condición de parada: Si el modelo dice que la frase terminó, paramos ya.
+                if idx_token.item() == end_token_id:
+                    break
 
-                probs = F.softmax(output,dim=-1)
-
-                idx_token = torch.multinomial(probs[:,t,:],num_samples=1)
-
-                y[:,t] = idx_token
-
-
-
-        return y  # (B, max_len)
-
+        return y
 
 
 

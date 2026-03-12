@@ -1,8 +1,9 @@
 import tiktoken
-from  Transformer import CONTEXT_LENGTH
+from  transformer import CONTEXT_LENGTH
 import torch
 import numpy as np
 from torch.utils.data import Dataset
+from tokenizers import Tokenizer as HFTokenizer
 
 class Tokenizer():
     """
@@ -11,69 +12,87 @@ class Tokenizer():
     Se usará el algoritmo ya implementado de la liberia tiktoken y el vocabulario de GPT2
     """
 
-    def __init__(self):
-        self.gpt2 = tiktoken.get_encoding("gpt2")  #No confundir con el encoder del Transformer
-
-        self.encoder = tiktoken.Encoding(
-            name = "encoder",
-            pat_str = self.gpt2._pat_str,
-            mergeable_ranks = self.gpt2._mergeable_ranks,
-            special_tokens = {
-                **self.gpt2._special_tokens,
-                "<START>": len(self.gpt2._mergeable_ranks) +1,
-                "<END>": len(self.gpt2._mergeable_ranks) +2,
-                "<PAD>": len(self.gpt2._mergeable_ranks) +3
-            },
-        )
+    def __init__(self,path):
+      # Cargamos el vocabulario que creamos en el paso anterior
+        self.encoder = HFTokenizer.from_file(path)
+        
+        # Extraemos y guardamos los IDs de los tokens especiales para un acceso rápido
+        self._pad_id = self.encoder.token_to_id("<PAD>")
+        self._start_id = self.encoder.token_to_id("<START>")
+        self._end_id = self.encoder.token_to_id("<END>")
 
 
     def __len__(self):
-        return len(self.encoder._mergeable_ranks) + len(self.encoder._special_tokens)
+        return self.encoder.get_vocab_size()
 
 
     def pad_id(self):
-        return self.encoder._special_tokens["<PAD>"]
+        return self._pad_id
 
     def end_of_text_id(self):
-        return self.encoder._special_tokens["<END>"]
+        return self._end_id
 
-    def star_of_text_id(self):
-        return self.encoder._special_tokens["<START>"]
+    def star_of_text_id(self): # (Mantengo tu nombre de función 'star' por compatibilidad)
+        return self._start_id
 
 
     def add_pad_token(self,tokens):
         pad = [self.pad_id() for _ in range(CONTEXT_LENGTH-len(tokens))]
         return np.concatenate((tokens,pad))
 
-    def encode(self,input: str,pad = True):
+    def encode(self, input: str, pad=True):
+        # 1. Codificamos solo el texto limpio (devuelve una lista de IDs)
+        raw_tokens = self.encoder.encode(input).ids
 
-        tokens  =self.encoder.encode("<START>"+input + "<END>",allowed_special="all")
+        # 2. Le pegamos el START al principio y el END al final matemáticamente
+        tokens = [self.star_of_text_id()] + raw_tokens + [self.end_of_text_id()]
 
-
-
+        # 3. Truncamos si se pasa del CONTEXT_LENGTH (dejando espacio para el END)
         if len(tokens) > CONTEXT_LENGTH:
-            tokens =  tokens[:(CONTEXT_LENGTH-1)] + [self.tokenizer.end_of_text_id()]
+            tokens = tokens[:(CONTEXT_LENGTH - 1)] + [self.end_of_text_id()]
         
+        # 4. Rellenamos con PAD si es necesario
         if pad:
             tokens = self.add_pad_token(tokens)
 
         return tokens
 
-   
+    def encode_batch(self, input, pad=True):
+        batch_tokens = []
+    
+        for text in input:
+            tokens = self.encode(text, pad=pad)
+            batch_tokens.append(tokens)
+        
+        # Agrupamos todo de forma súper rápida en C con NumPy primero
+        np_batch = np.array(batch_tokens)
+        
+        return torch.tensor(np_batch, dtype=torch.long)
+        
     def empty_predict(self):
-        tokens = self.encoder.encode("<START>",allowed_special="all")
+        # Genera un vector que solo tiene el START y el resto es PAD
+        tokens = [self.star_of_text_id()]
         tokens = self.add_pad_token(tokens)
-
         return tokens
-    def decoder(self,input):
 
-
-        return self.encoder.decode(input.cpu().numpy())
+    def decoder(self, input, skip_special_tokens=True):
+        """
+        Convierte una lista o tensor de IDs de vuelta a texto.
+        skip_special_tokens=True oculta los <PAD>, <START> y <END> al imprimir.
+        """
+        # Si le pasas un tensor de PyTorch, lo convertimos a lista de Python
+        if isinstance(input, torch.Tensor) or isinstance(input, np.ndarray):
+            ids = input.tolist()
+        else:
+            ids = input
+            
+        # Decodificamos
+        return self.encoder.decode(ids, skip_special_tokens=skip_special_tokens)
 
 
 
 # Dataset
-class Dataset_(Dataset):
+class Dataset(Dataset):
     def __init__(self, data, tokenizer):
         self.data = data
         self.X = self.data['en']
@@ -94,8 +113,4 @@ class Dataset_(Dataset):
         es_text = self.y.iloc[idx]
 
 
-        #COnvertimos a tensores
-        es_tokens =  torch.tensor(self.tokenizer.encode(es_text),dtype=torch.long)
-        en_tokens = torch.tensor(self.tokenizer.encode(en_text),dtype= torch.long)
-
-        return en_tokens, es_tokens
+        return en_text, es_text
