@@ -15,14 +15,12 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 
-CONTEXT_LENGTH = 64
-D_EMBEDDING = 512
+CONTEXT_LENGTH = 128
+D_EMBEDDING = 256
 ATTENTION_HEADS = 8
-DROPOUT = 0.0
-NUMBER_ENCODERS = 6
-NUMBER_DECODERS= 6
-LEARNING_RATE = 1e-3
-
+DROPOUT = 0.1
+NUMBER_ENCODERS = 4
+NUMBER_DECODERS= 4
 
 
 class AttentionHead(nn.Module):
@@ -33,9 +31,9 @@ class AttentionHead(nn.Module):
         self.key = nn.Linear(in_features=D_EMBEDDING,out_features=dimension, bias=False)
         self.query = nn.Linear(in_features=D_EMBEDDING,out_features=dimension, bias=False)
         self.value = nn.Linear(in_features=D_EMBEDDING,out_features=dimension, bias = False)
-
+        self.register_buffer('tril', torch.tril(torch.ones(CONTEXT_LENGTH, CONTEXT_LENGTH)))
         
-        #self.dropout = nn.Dropout(DROPOUT)
+        self.dropout = nn.Dropout(DROPOUT)
 
     def forward(self,key_input,query_input,value_input, padding_mask = None, masked_attention = False):
         """
@@ -46,7 +44,7 @@ class AttentionHead(nn.Module):
 
         #B = numero de Batch; T = numero de "tokens"; C = dimension de cada token
         B, N, D_i = query_input.shape
-        self.register_buffer('tril', torch.tril(torch.ones(CONTEXT_LENGTH, CONTEXT_LENGTH)).to(value_input.device))
+        
         
 
         K = self.key(key_input) # (B, N , D_i)
@@ -71,6 +69,8 @@ class AttentionHead(nn.Module):
             scores = scores.masked_fill(self.tril[:N, :N] == 0, float('-inf')) # (B, T, T)
 
         scores = F.softmax(scores, dim=-1) #Aplicamos softmax sobre las filas, es decir, sobre la ultima dimension
+
+        scores = self.dropout(scores)
 
         attention = scores @ V
 
@@ -106,6 +106,8 @@ class MultiHeadAttention(nn.Module):
 
         outputs = torch.cat(outputs, dim =-1) # Matriz N x D_embedding (por cada batch) => (B, N, D_embedding)
         multiple_attention = self.projection(outputs)
+
+        multiple_attention = self.dropout(multiple_attention)
 
         return multiple_attention
 

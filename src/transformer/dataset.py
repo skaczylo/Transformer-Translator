@@ -9,13 +9,14 @@ class Tokenizer():
     """
     TOKENIZADOR
     Clase que permitirá dividir o tokenizar un string en tokens.
-    Se usará el algoritmo ya implementado de la liberia tiktoken y el vocabulario de GPT2
+    Se usará el algoritmo ya implementado de la liberia tiktoken 
     """
 
-    def __init__(self,path):
+    def __init__(self,path,context_length = CONTEXT_LENGTH):
       # Cargamos el vocabulario que creamos en el paso anterior
         self.encoder = HFTokenizer.from_file(path)
         
+        self.context_length = context_length
         # Extraemos y guardamos los IDs de los tokens especiales para un acceso rápido
         self._pad_id = self.encoder.token_to_id("<PAD>")
         self._start_id = self.encoder.token_to_id("<START>")
@@ -37,19 +38,17 @@ class Tokenizer():
 
 
     def add_pad_token(self,tokens):
-        pad = [self.pad_id() for _ in range(CONTEXT_LENGTH-len(tokens))]
+        pad = [self.pad_id() for _ in range(self.context_length-len(tokens))]
         return np.concatenate((tokens,pad))
 
     def encode(self, input: str, pad=True):
        
         raw_tokens = self.encoder.encode(input).ids
-
-        
         tokens = [self.star_of_text_id()] + raw_tokens + [self.end_of_text_id()]
 
        
-        if len(tokens) > CONTEXT_LENGTH:
-            tokens = tokens[:(CONTEXT_LENGTH - 1)] + [self.end_of_text_id()]
+        if len(tokens) > self.context_length:
+            tokens = tokens[:(self.context_length - 1)] + [self.end_of_text_id()]
         
         # 4. Rellenamos con PAD si es necesario
         if pad:
@@ -102,8 +101,6 @@ class Dataset(Dataset):
 
     def __len__(self):
         return len(self.data)
-
-
 
 
     def __getitem__(self, idx):
