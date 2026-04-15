@@ -15,3 +15,6 @@ dependencies = [
 
 [project.scripts]
 traducir = "infer:main"
+
+[tool.uv]
+package = true

@@ -72,9 +72,9 @@ def display_banner():
     print(caja)
     print(logo)
     # También traducimos el mensaje de carga
-    print(f" 🎉 {GRIS}Modelo cargado con éxito. ¡Listo para traducir!{RESET}")
-    print(f"    {GRIS}Escribe una frase en inglés y pulsa Enter.{RESET}")
-    print(f"    {GRIS}Para salir, escribe 'exit', 'quit' o 'salir'.{RESET}\n")
+    print(f"{GRIS}Modelo cargado con éxito. ¡Listo para traducir!{RESET}")
+    print(f"{GRIS}Escribe una frase en inglés y pulsa Enter.{RESET}")
+    print(f"{GRIS}Para salir, escribe 'exit', 'quit' o 'salir'.{RESET}\n")
     
 
 
