@@ -134,7 +134,11 @@ Para iniciar la interfaz interactiva en la terminal y empezar a traducir, ejecut
 ```bash
 uv run traductor
 ```
-
+<p align="center">
+  <img src="media/cli.png" width="900" alt="CLI">
+  <br>
+  <em>CLI</em>
+</p>
 
 
 
