@@ -194,17 +194,19 @@ class Transformer(nn.Module):
         self.cfg = cfg
 
        
-        self.input_embedding_table  = nn.Embedding(cfg.vocab_size, cfg.d_embedding, padding_idx=cfg.pad_id)
+        # Embeddings (El ORDEN de declaración es VITAL para cargar el Optimizador)
+        self.input_embedding_table = nn.Embedding(cfg.vocab_size, cfg.d_embedding, padding_idx=cfg.pad_id)
+        self.input_positional_encoding = nn.Embedding(cfg.context_length, cfg.d_embedding)
+        
         self.output_embedding_table = nn.Embedding(cfg.vocab_size, cfg.d_embedding, padding_idx=cfg.pad_id)
-        self.input_positional_encoding  = nn.Embedding(cfg.context_length, cfg.d_embedding)
         self.output_positional_encoding = nn.Embedding(cfg.context_length, cfg.d_embedding)
 
-        # Bloques
+        # Bloques (Esto se queda igual)
         self.encoder_blocks = nn.ModuleList([Encoder(cfg) for _ in range(cfg.num_encoders)])
         self.decoder_blocks = nn.ModuleList([Decoder(cfg) for _ in range(cfg.num_decoders)])
         
         # Linear Final
-        self.linear         = nn.Linear(cfg.d_embedding, cfg.vocab_size)
+        self.linear = nn.Linear(cfg.d_embedding, cfg.vocab_size)
 
         # Inicialización de pesos
         self.apply(self._init_weights)
